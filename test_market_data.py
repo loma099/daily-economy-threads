@@ -1,10 +1,18 @@
 import unittest
 from unittest.mock import Mock,patch
 from datetime import datetime,timezone,timedelta
-from briefing import official_market_sources,available_model,quarantine_unsupported,TOPICS
+from briefing import official_market_sources,available_model,generate,quarantine_unsupported,TOPICS
 
 
 class DataChecks(unittest.TestCase):
+    def test_temporary_ai_overload_retries_creation_only(self):
+        busy=Mock(status_code=503,ok=False)
+        ready=Mock(status_code=200,ok=True)
+        ready.json.return_value={'candidates':[{'content':{'parts':[{'text':'{"approved":true}'}]}}]}
+        with patch.dict('os.environ',{'GEMINI_API_KEY':'test-only'}),patch('briefing.available_model',return_value='gemini-3.8-flash'),patch('briefing.requests.post',side_effect=[busy,ready]) as post,patch('briefing.time.sleep'):
+            self.assertEqual(generate('test'),{'approved':True})
+        self.assertEqual(post.call_count,2)
+
     def test_unverified_number_is_withheld_without_relaxing_validation(self):
         sections=[{'number':n,'topic':topic,'status':'확인 불가','source_ids':[],
                    'title':'확인 불가','bullets':[]} for n,topic in enumerate(TOPICS,1)]
