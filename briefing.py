@@ -239,8 +239,9 @@ def validate(doc, records, date):
                         re.findall(r'[-+]?\d+(?:,\d{3})*(?:\.\d+)?',text)}
             fields={k:section.get(k) for k in ('title','bullets','impact','table')}
             permitted=numbers(evidence)|{Decimal(i) for i in range(1,12)}|numbers(date)
-            if numbers(json.dumps(fields,ensure_ascii=False))-permitted:
-                raise ValueError('본문에 인용한 원문에서 확인되지 않은 숫자가 있습니다.')
+            unsupported=numbers(json.dumps(fields,ensure_ascii=False))-permitted
+            if unsupported:
+                raise ValueError(f'{n}번 항목: 인용 원문에 없는 숫자 '+', '.join(str(v) for v in sorted(unsupported)))
     if len(doc.get('caption', '')) > 450:
         raise ValueError('Threads 캡션 길이 초과')
     outlook=sections[9]
@@ -284,6 +285,7 @@ def main():
         'evidence': evidence,
     }
     doc = generate(json.dumps(instruction, ensure_ascii=False))
+    (OUT/'initial_draft.json').write_text(json.dumps(doc,ensure_ascii=False,indent=2),encoding='utf-8')
     doc['checked_at'] = now.strftime('검토 마감 %m/%d %H:%M KST')
     try:
         validate(doc, records, now.date().isoformat())
