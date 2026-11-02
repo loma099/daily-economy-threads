@@ -75,7 +75,8 @@ def get_token(repo):
 
 
 def main():
-    if os.environ.get('ENABLE_PUBLISH')!='true':
+    preview=os.environ.get('ENABLE_PUBLISH')=='preview'
+    if os.environ.get('ENABLE_PUBLISH') not in ('true','preview'):
         raise RuntimeError('실제 게시 연결 미활성: 시험 통과 후에만 활성화합니다.')
     ready=json.loads(Path('build/ready.json').read_text(encoding='utf-8'))
     today=datetime.now(KST).date().isoformat()
@@ -87,7 +88,7 @@ def main():
     repo=Repository()
     receipt_path=f'.state/{today}.json'
     existing,_=repo.get(receipt_path)
-    if existing:
+    if existing and not preview:
         receipt=json.loads(existing)
         if receipt.get('status')=='published':
             print('당일 게시 영수증 확인: 중복 게시하지 않음')
@@ -101,7 +102,7 @@ def main():
     from connection_check import validate_token_metadata
     validate_token_metadata(api.call('GET','/debug_token',{'input_token':api.token})['data'])
     recent=api.call('GET',f'/{api.user_id}/threads',{'fields':'id,text,timestamp,permalink','limit':25})
-    for post in recent.get('data',[]):
+    for post in ([] if preview else recent.get('data',[])):
         try:
             stamp=datetime.fromisoformat(post.get('timestamp','').replace('Z','+00:00'))
         except ValueError:
@@ -118,6 +119,12 @@ def main():
     content=png.read_bytes()
     image_path=f'public/briefing_{today}.png'
     repo.put(image_path,content,f'Publish verified infographic {today}')
+    if preview:
+        draft=json.loads(Path('build/draft.json').read_text(encoding='utf-8'))
+        for section in draft['sections']:
+            section.pop('evidence_quotes',None)
+        repo.put(f'public/preview_{today}.json',json.dumps(draft,ensure_ascii=False,indent=2).encode(),
+                 'Save checked briefing preview')
     sources=json.loads(Path('build/sources.json').read_text(encoding='utf-8'))
     source_list='\n'.join(f"- {s['publisher']} | 관측/발행일: {s.get('observed_date') or s.get('published') or '확인 불가'} | {s['url']}" for s in sources['sources'])
     # Publish URLs and dates only, never scraped full articles or auth data.
@@ -133,7 +140,7 @@ def main():
     else:
         raise RuntimeError('공개 PNG 원본 확인 실패: 게시 중단')
     target=datetime.now(KST).replace(hour=7,minute=0,second=0,microsecond=0)
-    while datetime.now(KST)<target:
+    while not preview and datetime.now(KST)<target:
         time.sleep(min(30,(target-datetime.now(KST)).total_seconds()))
     if datetime.now(KST).date().isoformat()!=today:
         raise RuntimeError('게시 전 날짜 변경됨')
@@ -144,7 +151,8 @@ def main():
     pending={'date':today,'status':'prepared','container_id':container,
              'image_sha256':hashlib.sha256(content).hexdigest(),'image_url':url,
              'attempted_at':datetime.now(KST).isoformat()}
-    repo.put(receipt_path,json.dumps(pending,ensure_ascii=False).encode(),'Record Threads container before publish')
+    if not preview:
+        repo.put(receipt_path,json.dumps(pending,ensure_ascii=False).encode(),'Record Threads container before publish')
     for _ in range(12):
         status=api.container_status(container).get('status')
         if status=='FINISHED':
@@ -154,6 +162,12 @@ def main():
         time.sleep(5)
     else:
         raise RuntimeError('이미지 처리 대기 시간 초과: 자동 재게시 금지')
+    if preview:
+        pending['status']='image_processing_verified_not_published'
+        repo.put(f'.state/preview_{today}.json',json.dumps(pending,ensure_ascii=False).encode(),
+                 'Record successful Threads image processing test')
+        print('미게시 이미지 처리 시험 통과: '+url)
+        return
     # A durable pending receipt exists before this non-idempotent request.
     post_id=api.publish(container)
     post=api.post(post_id)
