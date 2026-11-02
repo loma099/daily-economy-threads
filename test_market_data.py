@@ -1,10 +1,21 @@
 import unittest
 from unittest.mock import Mock,patch
 from datetime import datetime,timezone,timedelta
-from briefing import official_market_sources,available_model
+from briefing import official_market_sources,available_model,quarantine_unsupported,TOPICS
 
 
 class DataChecks(unittest.TestCase):
+    def test_unverified_number_is_withheld_without_relaxing_validation(self):
+        sections=[{'number':n,'topic':topic,'status':'확인 불가','source_ids':[],
+                   'title':'확인 불가','bullets':[]} for n,topic in enumerate(TOPICS,1)]
+        sections[8].update(status='확인',source_ids=[1],bullets=['성장률 32%'],
+                           evidence_quotes=[{'source_id':1,'text':'growth was 3.2 percent'}])
+        sections[9].update(positive=[],negative=[],ideas=['관찰']*3)
+        data={'date':'2026-11-02','sections':sections,'caption':''}
+        quarantine_unsupported(data,[{'id':1,'article_text':'growth was 3.2 percent'}],'2026-11-02')
+        self.assertEqual(sections[8]['status'],'확인 불가')
+        self.assertNotIn('32',str(sections[8]['bullets']))
+
     def test_yield_change_is_basis_points_and_has_observation_date(self):
         response=Mock(text='observation_date,DGS10\n2026-10-29,4.10\n2026-10-30,4.08\n')
         with patch('briefing.SERIES',[('DGS10','미국 10년','연 %')]),patch('briefing.requests.get',return_value=response):
