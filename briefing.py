@@ -71,6 +71,7 @@ def official_market_sources(now):
                 return None
             (prior_date,prior),(observed,value)=rows[-2:]
             text=f'{label}; 시계열 {sid}; 단위 {unit}; 최근 공개 관측일 {observed}; 값 {value}; 이전 관측일 {prior_date}; 값 {prior}.'
+            change=None
             if sid in ('DGS2','DGS10'):
                 change=((value-prior)*100).quantize(Decimal('.01'))
                 text+=f' 이전 관측 대비 {change:+}bp (프로그램 계산, 1%p=100bp).'
@@ -81,7 +82,8 @@ def official_market_sources(now):
             return {'publisher':'FRED / '+sid,'url':'https://fred.stlouisfed.org/series/'+sid,
                     'published':None,'observed_date':observed,'retrieved_at':now.isoformat(),
                     'title':label+' 최근 공개 자료','data_type':'official_timeseries',
-                    'excerpt':text,'article_text':text}
+                    'excerpt':text,'article_text':text,'series_id':sid,'value':str(value),
+                    'change':str(change) if sid not in ('DFEDTARL','DFEDTARU') else None}
         except (requests.RequestException,ValueError,InvalidOperation):
             return None
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -282,6 +284,54 @@ def normalize_format(doc):
     return doc
 
 
+def attach_official_tables(doc,records):
+    if len(doc.get('sections',[]))!=11:
+        return doc
+    by_series={r['series_id']:r for r in records if r.get('series_id')}
+    specs={
+        1:([('SP500','S&P500'),('DJIA','다우'),('NASDAQCOM','나스닥')],
+           ['지수·관측일','종가','변동 %'],'지수별 관측일 확인 · 같은 거래일 비교에 주의'),
+        2:([('DGS2','2년'),('DGS10','10년')],
+           ['만기·관측일','연 %','변동 bp'],'고정만기 수익률 · 변동은 이전 관측일 대비'),
+        3:([('DCOILBRENTEU','브렌트'),('DCOILWTICO','WTI')],
+           ['유종·관측일','달러/배럴','변동 %'],'EIA 현물값 · 원유 선물 결제가격과 구분'),
+        4:([('DFEDTARL','목표 하단'),('DFEDTARU','목표 상단')],
+           ['연준 정책금리','연 %','관측일'],'목표 범위 공개자료 · 신규 정책 결정 아님'),
+        5:([('DEXKOUS','원/달러'),('DEXJPUS','엔/달러')],
+           ['참고환율·관측일','값','변동 %'],'연준 참고환율 · 국내 마감환율과 구분'),
+        6:([('CBBTCUSD','BTC')],
+           ['자산·관측일','달러','변동 %'],'비트코인 일별값 · 금 시세는 별도 확인 필요'),
+    }
+    for n,(pairs,headers,note) in specs.items():
+        sec=doc['sections'][n-1]
+        selected=[(by_series[sid],label) for sid,label in pairs if sid in by_series]
+        if not selected:
+            if not sec.get('table'):
+                sec['table']={'headers':headers,'rows':[['확인 불가','—','—']]}
+            continue
+        rows=[]
+        for r,label in selected:
+            stamp=r['observed_date'][5:]
+            rows.append([label,r['value'],stamp] if n==4 else
+                        [label+' '+stamp,r['value'],r['change'] or '—'])
+            if r['id'] not in sec.setdefault('source_ids',[]):
+                sec['source_ids'].append(r['id'])
+            sec.setdefault('evidence_quotes',[]).append({'source_id':r['id'],'text':r['article_text'][:140]})
+        titles={1:'관측일별 최근 공개 주가지수',2:'미 국채 고정만기 수익률',
+                3:'EIA 원유 현물 가격',4:'연준 정책금리 목표 범위',
+                5:'연준 일별 참고 환율',6:'비트코인 일별 공개 자료'}
+        impacts={1:'지수별 관측일을 맞춰 시장 흐름 비교',2:'금리 변동 지속 여부와 만기별 차이 관찰',
+                 3:'현물 유가 변동이 물가에 미칠 영향 점검',4:'신규 정책 발표와 기존 금리 수준을 구분',
+                 5:'참고환율과 실제 거래환율의 차이에 유의',6:'가상자산 변동성 및 거래소 위험을 함께 관찰'}
+        sec.update(status='확인',table={'headers':headers,'rows':rows},bullets=[note],
+                   title=titles[n],impact=impacts[n])
+    schedule=doc['sections'][10]
+    if not schedule.get('table'):
+        schedule['table']={'headers':['한국 날짜','시간','이벤트'],
+                           'rows':[['이번 주','미확인','공식 일정 확인 필요']]}
+    return doc
+
+
 def main():
     OUT.mkdir(exist_ok=True)
     now = datetime.now(KST)
@@ -318,7 +368,7 @@ def main():
                    'comment':'80자 이내 조건부 코멘트'},
         'evidence': evidence,
     }
-    doc = normalize_format(generate(json.dumps(instruction, ensure_ascii=False)))
+    doc = attach_official_tables(normalize_format(generate(json.dumps(instruction, ensure_ascii=False))),records)
     (OUT/'initial_draft.json').write_text(json.dumps(doc,ensure_ascii=False,indent=2),encoding='utf-8')
     doc['checked_at'] = now.strftime('검토 마감 %m/%d %H:%M KST')
     try:
@@ -329,6 +379,7 @@ def main():
                                  '불확실한 항목은 확인 불가로 표시. JSON 초안 전체 반환.',
                                  'validation_error':str(exc),'draft':doc,'requirements':instruction},ensure_ascii=False)))
         doc['checked_at']=now.strftime('검토 마감 %m/%d %H:%M KST')
+        attach_official_tables(doc,records)
         quarantine_unsupported(doc,records,now.date().isoformat())
     (OUT/'draft.json').write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding='utf-8')
     review = generate(json.dumps({'task': '초안의 모든 주장을 근거와 대조. 근거 부족, 시점 혼동, 숫자 오류면 reject. '
