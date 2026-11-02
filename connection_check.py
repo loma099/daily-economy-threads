@@ -8,7 +8,10 @@ from threads_api import ThreadsAPI
 
 
 def validate_token_metadata(data):
-    if data.get('is_valid') is not True or str(data.get('app_id'))!='1441693181500200':
+    app_id=data.get('app_id') or data.get('client_id') or data.get('application_id')
+    app_matches=(str(app_id) in {'1441693181500200','976266151698671'} if app_id
+                 else data.get('application')=='Daily Economy Briefing')
+    if data.get('is_valid') is not True or not app_matches:
         raise RuntimeError('토큰이 유효하지 않거나 전용 앱 토큰이 아닙니다.')
     allowed={'threads_basic','threads_content_publish'}
     scopes=set(data.get('scopes',[]))
