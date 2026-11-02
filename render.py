@@ -122,7 +122,7 @@ def render(doc, output):
             picture(str(n),x+8,yy,128,photo_height)
             summary = sec.get('table')
             if summary:
-                yy = table(x+145,yy,summary['headers'],summary['rows'],294)
+                yy = max(table(x+145,yy,summary['headers'],summary['rows'],294),yy+photo_height+7)
             elif n in (7,8,9):
                 wrap(x+145,yy,['• '+v for v in sec.get('bullets',[])],284,y+h-40,13,19)
                 yy+=photo_height+7
