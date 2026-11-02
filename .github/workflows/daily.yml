@@ -29,7 +29,7 @@ jobs:
       - name: Create and review today's briefing
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
         run: python briefing.py
       - uses: actions/upload-artifact@v4
         if: always()
@@ -37,6 +37,15 @@ jobs:
           name: briefing-review
           path: build/
           retention-days: 3
+      - name: Verify image processing without publishing
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish
+        env:
+          ENABLE_PUBLISH: 'preview'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          THREADS_USERNAME: lej0954
+        run: python publish.py
       - name: Publish with durable receipt
         if: vars.ENABLE_DAILY == 'true' && (github.event_name == 'schedule' || inputs.publish)
         env:
