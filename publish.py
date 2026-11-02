@@ -47,11 +47,15 @@ class Repository:
 
 def get_token(repo):
     cipher=Fernet(os.environ['TOKEN_ENCRYPTION_KEY'].encode())
+    seed=os.environ['THREADS_ACCESS_TOKEN'].strip()
+    seed_hash=hashlib.sha256(seed.encode()).hexdigest()
     stored,_=repo.get('.state/threads-token.enc')
     if stored:
         data=json.loads(cipher.decrypt(stored))
+        if data.get('seed_hash')!=seed_hash:
+            data={'token':seed,'renewed_at':None,'seed_hash':seed_hash}
     else:
-        data={'token':os.environ['THREADS_ACCESS_TOKEN'],'renewed_at':None}
+        data={'token':seed,'renewed_at':None,'seed_hash':seed_hash}
     now=datetime.now(timezone.utc)
     renewed=datetime.fromisoformat(data['renewed_at']) if data.get('renewed_at') else None
     if renewed is None or now-renewed>timedelta(days=7):
@@ -94,6 +98,22 @@ def main():
     if (api.user_id!='0' and identity['id']!=api.user_id) or identity.get('username')!=os.environ['THREADS_USERNAME']:
         raise RuntimeError('게시 계정 불일치')
     api.user_id=identity['id']
+    from connection_check import validate_token_metadata
+    validate_token_metadata(api.call('GET','/debug_token',{'input_token':api.token})['data'])
+    recent=api.call('GET',f'/{api.user_id}/threads',{'fields':'id,text,timestamp,permalink','limit':25})
+    for post in recent.get('data',[]):
+        try:
+            stamp=datetime.fromisoformat(post.get('timestamp','').replace('Z','+00:00'))
+        except ValueError:
+            continue
+        text=post.get('text','').replace(' ','')
+        if stamp.astimezone(KST).date().isoformat()==today and '경제브리핑' in text:
+            receipt={'date':today,'status':'published','post_id':post['id'],
+                     'permalink':post.get('permalink'),'source':'existing_same_day_briefing',
+                     'checked_at':datetime.now(KST).isoformat()}
+            repo.put(receipt_path,json.dumps(receipt,ensure_ascii=False).encode(),f'Record existing briefing {today}')
+            print('당일 기존 브리핑 확인: 중복 게시하지 않음 '+str(post.get('permalink','')))
+            return
     png=Path('build')/ready['png']
     content=png.read_bytes()
     image_path=f'public/briefing_{today}.png'
