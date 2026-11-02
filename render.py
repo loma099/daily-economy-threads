@@ -110,14 +110,22 @@ def render(doc, output):
         gradient((x+2,y+2,443,31))
         rect((x+2,y+2,x+36,y+33),RED)
         text(x+8,y+5,n,22,'white')
-        fit(x+46,y+9,sec['topic']+' · '+sec.get('title',''),17,'white',392)
+        heading=sec['topic']+' · '+sec.get('title','')
+        if n==10:
+            heading='시장 전망 및 조건부 관찰 아이디어'
+        elif n==11:
+            heading='이번 주 경제지표·이벤트 (한국시간)'
+        fit(x+46,y+9,heading,17,'white',392)
         yy = y+41
         if n in (1,2,3,4,5,6,7,8,9):
-            photo_height = min(65, max(30, h-130))
+            photo_height = 85 if n==7 else min(65, max(30, h-130))
             picture(str(n),x+8,yy,128,photo_height)
             summary = sec.get('table')
             if summary:
                 yy = table(x+145,yy,summary['headers'],summary['rows'],294)
+            elif n==7:
+                wrap(x+145,yy,['• '+v for v in sec.get('bullets',[])],284,y+h-40,13,19)
+                yy+=photo_height+7
             else:
                 wrap(x+145,yy,[sec.get('status','확인 불가')],284,y+110,13,19)
                 yy += photo_height+7
@@ -143,7 +151,7 @@ def render(doc, output):
         elif n == 11 and sec.get('table'):
             t = sec['table']
             yy = table(x+8,yy,t['headers'],t['rows'])
-        else:
+        elif n!=7:
             yy = wrap(x+9,yy,['• '+v for v in sec.get('bullets',[])],425,y+h-39,13,19)
         fit(x+10,y+h-33,'▶ '+sec.get('impact','확인된 조건을 우선 관찰'),13,RED,424)
         fit(x+10,y+h-15,'출처 '+','.join(map(str,sec.get('source_ids',[])))+' · 정보 제공용',9,'#536171',424)
