@@ -1,0 +1,37 @@
+name: Check missing daily Threads post
+on:
+  schedule:
+    - cron: '10 23 * * *'
+    - cron: '10 1 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check-publication:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require today's published receipt (Korea time)
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone, timedelta
+          from pathlib import Path
+          today = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+          path = Path('.state') / (today + '.json')
+          try:
+              receipt = json.loads(path.read_text(encoding='utf-8'))
+          except (OSError, ValueError):
+              receipt = {}
+          valid = (receipt.get('date') == today and receipt.get('status') == 'published'
+                   and bool(receipt.get('post_id')) and bool(receipt.get('permalink')))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as output:
+              output.write(f'# {today} Threads publication check\n\n')
+              output.write('Published receipt verified.\n' if valid else
+                           'No valid published receipt for today. The posting schedule may not have started, may be delayed, or may have failed. Check Daily economic briefing in the Actions tab before retrying; avoid duplicate posts.\n')
+          if not valid:
+              print(f'::error::No published Threads receipt for {today} (Korea time). Scheduled posting may be missing, delayed, or failed. Check Actions.')
+              raise SystemExit(1)
+          print(f'{today}: published receipt verified')
+          PY
