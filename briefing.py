@@ -7,6 +7,7 @@ from email.utils import parsedate_to_datetime
 
 import feedparser
 import requests
+from functools import lru_cache
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
@@ -83,11 +84,36 @@ def collect(now):
     return records, health
 
 
+@lru_cache(maxsize=1)
+def available_model():
+    key=os.environ.get('GEMINI_API_KEY','')
+    if not key:
+        raise RuntimeError('무료 AI 키 연결 필요')
+    response=requests.get('https://generativelanguage.googleapis.com/v1beta/models',
+                          headers={'x-goog-api-key':key},timeout=40)
+    if not response.ok:
+        raise RuntimeError(f'AI 모델 목록 확인 실패 HTTP {response.status_code}')
+    names={m['name'].removeprefix('models/') for m in response.json().get('models',[])
+           if 'generateContent' in m.get('supportedGenerationMethods',[])}
+    # These models have a documented free tier as checked on 2026-11-02.
+    # The project must have no billing account; never choose a paid-only model.
+    allowed=['gemini-3.5-flash-lite','gemini-3.1-flash-lite','gemini-2.5-flash']
+    requested=os.environ.get('GEMINI_MODEL','')
+    if requested in allowed and requested in names:
+        selected=requested
+    else:
+        selected=next((name for name in allowed if name in names),None)
+    if not selected:
+        raise RuntimeError('검증된 무료 모델이 제공되지 않음: 게시 중단')
+    print('사용 모델: '+selected+' (결제 미연결 무료 프로젝트)')
+    return selected
+
+
 def generate(prompt, image_path=None):
     key = os.environ.get('GEMINI_API_KEY', '')
-    model = os.environ.get('GEMINI_MODEL', '')
-    if not key or not model:
+    if not key:
         raise RuntimeError('무료 AI 프로젝트/API 키와 무료 지원 모델 연결이 필요합니다.')
+    model=available_model()
     # Header keeps the key out of the request URL and normal exception logs.
     parts = [{'text': prompt}]
     if image_path:
@@ -100,7 +126,12 @@ def generate(prompt, image_path=None):
         json={'contents': [{'parts': parts}],
               'generationConfig': {'responseMimeType': 'application/json'}})
     if not response.ok:
-        raise RuntimeError(f'AI 호출 중단: HTTP {response.status_code}; 유료 대체 없음')
+        try:
+            detail=response.json().get('error',{}).get('message','')
+            detail=detail.replace(key,'[redacted]').replace('\n',' ')[:350]
+        except ValueError:
+            detail='응답 형식 확인 필요'
+        raise RuntimeError(f'AI 호출 중단: HTTP {response.status_code}; {detail}; 유료 대체 없음')
     output_parts = response.json()['candidates'][0]['content']['parts']
     return json.loads(''.join(part.get('text', '') for part in output_parts))
 
