@@ -335,6 +335,18 @@ def attach_official_tables(doc,records):
 def main():
     OUT.mkdir(exist_ok=True)
     now = datetime.now(KST)
+    if os.environ.get('RECHECK_REVIEWED')=='true':
+        evidence=json.loads((OUT/'sources.json').read_text(encoding='utf-8'))
+        checked=datetime.fromisoformat(evidence['checked_at'])
+        review=json.loads((OUT/'review.json').read_text(encoding='utf-8'))
+        doc=json.loads((OUT/'draft.json').read_text(encoding='utf-8'))
+        if checked.date()!=now.date() or not timedelta(0)<=now-checked<=timedelta(hours=2):
+            raise RuntimeError('당일 검토 자료가 아니거나 2시간 경과: 재사용 금지')
+        if review.get('approved') is not True or review.get('issues'):
+            raise RuntimeError('근거 검토가 통과된 초안만 이미지 재검사 가능')
+        validate(doc,evidence['sources'],now.date().isoformat())
+        finish_image(doc,checked)
+        return
     records, health = collect(now)
     evidence = {'checked_at': now.isoformat(), 'sources': records, 'feeds': health}
     (OUT/'sources.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -390,6 +402,10 @@ def main():
     print('초안 근거 검토: '+json.dumps(review,ensure_ascii=False))
     if review.get('approved') is not True or review.get('issues'):
         raise RuntimeError('근거 대조 검사 미통과: 게시하지 않습니다.')
+    finish_image(doc,now)
+
+
+def finish_image(doc,now):
     if sum(s.get('status')=='확인' for s in doc['sections']) < 6:
         raise RuntimeError('확인 가능한 항목 부족: 완성본으로 게시하지 않습니다.')
     from render import render
@@ -405,7 +421,7 @@ def main():
         raise RuntimeError('이미지 검토 미통과: 게시하지 않습니다.')
     (OUT/'ready.json').write_text(json.dumps({'date':doc['date'],'png':target.name,
                                              'caption':doc['caption'],'checked_at':now.isoformat()},ensure_ascii=False),encoding='utf-8')
-    print('자료 대조 및 PNG 검사 완료. 게시 단계는 별도 연결이 필요합니다.')
+    print('자료 대조 및 PNG 검사 완료. 검토 시각: '+now.isoformat())
 
 
 if __name__ == '__main__':
