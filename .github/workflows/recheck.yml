@@ -1,0 +1,50 @@
+name: Recheck today's reviewed image
+on:
+  workflow_dispatch:
+    inputs:
+      review_run_id:
+        description: 'Same-day run with approved content review (under 2 hours)'
+        type: string
+        required: true
+      publish:
+        description: 'Publish after image checks; otherwise test image processing only'
+        type: boolean
+        default: false
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: daily-threads
+  cancel-in-progress: false
+jobs:
+  recheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update -qq && sudo apt-get install -y fonts-noto-cjk
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -p 'test_*.py' -v
+      - uses: actions/download-artifact@v8
+        with:
+          name: briefing-review
+          path: build
+          run-id: ${{ inputs.review_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Re-render and review PNG without changing verified facts
+        env:
+          RECHECK_REVIEWED: 'true'
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: gemini-3.8-flash
+        run: python briefing.py
+      - name: Verify image processing or publish with duplicate guard
+        env:
+          ENABLE_PUBLISH: ${{ inputs.publish && 'true' || 'preview' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          THREADS_USERNAME: lej0954
+        run: python publish.py
