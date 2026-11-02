@@ -3,6 +3,7 @@ import json
 import os
 import csv
 import io
+import re
 from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -182,11 +183,19 @@ def generate(prompt, image_path=None):
         import base64
         parts.append({'inline_data':{'mime_type':'image/png',
                                      'data':base64.b64encode(Path(image_path).read_bytes()).decode()}})
-    response = requests.post(
-        f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
-        headers={'x-goog-api-key': key}, timeout=150,
-        json={'contents': [{'parts': parts}],
-              'generationConfig': {'responseMimeType': 'application/json'}})
+    config={'responseMimeType':'application/json','maxOutputTokens':12000,
+            'thinkingConfig':{'thinkingLevel':'LOW'}}
+    for attempt in range(2):
+        try:
+            response = requests.post(
+                f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+                headers={'x-goog-api-key': key}, timeout=(15,240),
+                json={'contents': [{'parts': parts}], 'generationConfig':config})
+            break
+        except requests.ReadTimeout:
+            if attempt:
+                raise RuntimeError('무료 AI 응답 시간 초과: 게시하지 않습니다.') from None
+            print('AI 응답 대기 시간 초과: 제작 요청만 한 번 재시도합니다.')
     if not response.ok:
         try:
             detail=response.json().get('error',{}).get('message','')
@@ -223,6 +232,15 @@ def validate(doc, records, date):
                 raise ValueError('근거 인용 길이 오류')
             if not source or not source.get('article_text') or phrase not in source['article_text']:
                 raise ValueError('원문에서 근거 인용을 찾을 수 없음')
+        if section.get('status')=='확인':
+            evidence=' '.join(r.get('article_text','') for r in records if r['id'] in section['source_ids'])
+            def numbers(text):
+                return {abs(Decimal(value.replace(',',''))) for value in
+                        re.findall(r'[-+]?\d+(?:,\d{3})*(?:\.\d+)?',text)}
+            fields={k:section.get(k) for k in ('title','bullets','impact','table')}
+            permitted=numbers(evidence)|{Decimal(i) for i in range(1,12)}|numbers(date)
+            if numbers(json.dumps(fields,ensure_ascii=False))-permitted:
+                raise ValueError('본문에 인용한 원문에서 확인되지 않은 숫자가 있습니다.')
     if len(doc.get('caption', '')) > 450:
         raise ValueError('Threads 캡션 길이 초과')
     outlook=sections[9]
