@@ -249,6 +249,24 @@ def validate(doc, records, date):
         raise ValueError('긍정·부정 비교 및 조건부 아이디어 3개 필요')
 
 
+def quarantine_unsupported(doc, records, date):
+    """Keep the strict numeric check; withhold an unverified topic visibly."""
+    for _ in range(11):
+        try:
+            validate(doc, records, date)
+            return
+        except ValueError as exc:
+            match=re.match(r'(\d+)번 항목: 인용 원문에 없는 숫자 ',str(exc))
+            if not match:
+                raise
+            section=doc['sections'][int(match.group(1))-1]
+            print('수치 확인 보류: '+str(exc))
+            section.update(status='확인 불가', title=section['topic']+' · 수치 재확인 필요',
+                           bullets=['수집 원문과 숫자 대조 미통과', '확인되지 않은 수치·주장은 표시하지 않음'],
+                           impact='추가 확인 전 판단 보류',table=None,evidence_quotes=[])
+    validate(doc,records,date)
+
+
 def main():
     OUT.mkdir(exist_ok=True)
     now = datetime.now(KST)
@@ -274,7 +292,8 @@ def main():
                   '1~5,8,9번 bullets 최대 3개, 6~7번 최대 1개. 각 문장 최대 38자',
                   '10번 positive와 negative 각각 최대 3개(문장 최대 14자), ideas 정확히 3개(최대 45자)',
                   '11번 table은 한국 날짜·시간·이벤트 3열, 확인한 일정 최대 4행. 없으면 확인 불가',
-                  '시장 수치를 포함한 table에는 거래일과 기준시각을 셀에 함께 표시. 공간 부족시 생략'],
+                  '시장 수치를 포함한 table에는 거래일과 기준시각을 셀에 함께 표시. 공간 부족시 생략',
+                  '숫자는 인용 article_text에 실제 있는 숫자 그대로 사용. 단위 변환·반올림 금지'],
         'schema': {'date': 'YYYY-MM-DD', 'caption': '450자 이내',
                    'sections': [{'number': 1, 'topic': '지정된 주제',
                                  'status': '확인 또는 확인 불가',
@@ -295,15 +314,14 @@ def main():
                                  '불확실한 항목은 확인 불가로 표시. JSON 초안 전체 반환.',
                                  'validation_error':str(exc),'draft':doc,'requirements':instruction},ensure_ascii=False))
         doc['checked_at']=now.strftime('검토 마감 %m/%d %H:%M KST')
-        validate(doc,records,now.date().isoformat())
+        quarantine_unsupported(doc,records,now.date().isoformat())
     (OUT/'draft.json').write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding='utf-8')
     review = generate(json.dumps({'task': '초안의 모든 주장을 근거와 대조. 근거 부족, 시점 혼동, 숫자 오류면 reject. '
                                   '서로 다른 자료의 같은 사실을 교차 확인. 원문을 읽지 못한 것은 verified로 보지 않음. '
                                   'JSON {"approved":boolean,"issues":[string]} 반환.',
                                   'draft': doc, 'evidence': evidence}, ensure_ascii=False))
     (OUT/'review.json').write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding='utf-8')
-    # An LLM approval is only an intermediate signal. Full article retrieval,
-    # numeric cross-checks and PNG QA must be connected before auto-publishing.
+    print('초안 근거 검토: '+json.dumps(review,ensure_ascii=False))
     if review.get('approved') is not True or review.get('issues'):
         raise RuntimeError('근거 대조 검사 미통과: 게시하지 않습니다.')
     if sum(s.get('status')=='확인' for s in doc['sections']) < 6:
@@ -316,6 +334,7 @@ def main():
                                   'JSON {"approved":boolean,"issues":[string]} 반환.',
                                   'draft':doc},ensure_ascii=False),target)
     (OUT/'visual_review.json').write_text(json.dumps(visual,ensure_ascii=False,indent=2),encoding='utf-8')
+    print('PNG 검토: '+json.dumps(visual,ensure_ascii=False))
     if visual.get('approved') is not True or visual.get('issues'):
         raise RuntimeError('이미지 검토 미통과: 게시하지 않습니다.')
     (OUT/'ready.json').write_text(json.dumps({'date':doc['date'],'png':target.name,
