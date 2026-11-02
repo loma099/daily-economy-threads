@@ -38,7 +38,7 @@ jobs:
         env:
           RECHECK_REVIEWED: 'true'
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-3.8-flash
+          GEMINI_MODEL: gemini-3.1-flash-lite
         run: python briefing.py
       - name: Verify image processing or publish with duplicate guard
         env:
