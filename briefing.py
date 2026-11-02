@@ -4,6 +4,7 @@ import os
 import csv
 import io
 import re
+import time
 from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -185,17 +186,21 @@ def generate(prompt, image_path=None):
                                      'data':base64.b64encode(Path(image_path).read_bytes()).decode()}})
     config={'responseMimeType':'application/json','maxOutputTokens':12000,
             'thinkingConfig':{'thinkingLevel':'LOW'}}
-    for attempt in range(2):
+    for attempt in range(4):
         try:
             response = requests.post(
                 f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
                 headers={'x-goog-api-key': key}, timeout=(15,240),
                 json={'contents': [{'parts': parts}], 'generationConfig':config})
+            if response.status_code in (429,502,503,504) and attempt<3:
+                print(f'무료 AI 일시 대기 HTTP {response.status_code}: 제작 요청만 재시도',flush=True)
+                time.sleep(min(45,15*(attempt+1)))
+                continue
             break
         except requests.ReadTimeout:
-            if attempt:
+            if attempt==3:
                 raise RuntimeError('무료 AI 응답 시간 초과: 게시하지 않습니다.') from None
-            print('AI 응답 대기 시간 초과: 제작 요청만 한 번 재시도합니다.')
+            print('AI 응답 대기 시간 초과: 제작 요청만 재시도합니다.',flush=True)
     if not response.ok:
         try:
             detail=response.json().get('error',{}).get('message','')
