@@ -97,7 +97,7 @@ def available_model():
            if 'generateContent' in m.get('supportedGenerationMethods',[])}
     # These models have a documented free tier as checked on 2026-11-02.
     # The project must have no billing account; never choose a paid-only model.
-    allowed=['gemini-3.5-flash-lite','gemini-3.1-flash-lite','gemini-2.5-flash']
+    allowed=['gemini-3.8-flash','gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.1-flash-lite']
     requested=os.environ.get('GEMINI_MODEL','')
     if requested in allowed and requested in names:
         selected=requested
