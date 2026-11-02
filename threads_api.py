@@ -11,7 +11,7 @@ BASE = 'https://graph.threads.net/v1.0'
 
 class ThreadsAPI:
     def __init__(self, token=None, user_id=None, session=None):
-        self.token = token or os.environ['THREADS_ACCESS_TOKEN']
+        self.token = (token or os.environ['THREADS_ACCESS_TOKEN']).strip()
         self.user_id = user_id or os.environ.get('THREADS_USER_ID') or '0'
         if not self.user_id.isdecimal():
             raise ValueError('Invalid Threads user id')
