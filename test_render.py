@@ -21,7 +21,14 @@ class LayoutChecks(unittest.TestCase):
     def test_korean_render_and_image_size(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder:
             target=Path(folder)/'test.png'
-            render(sample(),target)
+            data=sample()
+            data['sections'][0]['table']={'headers':['지수','기준','값'],
+                                         'rows':[['S&P500','시험','확인 불가']]}
+            data['sections'][9].update(positive=['검증 후 판단'],negative=['단정 금지'],
+                                      ideas=['조건 확인 후 관찰','원문과 수치 확인','발표 시각 확인'])
+            data['sections'][10]['table']={'headers':['한국 날짜','시간','일정'],
+                                          'rows':[['검증 전','미정','연결 시험']]}
+            render(data,target)
             with Image.open(target) as image:
                 self.assertEqual(image.size,(2766,4146))
                 self.assertEqual(image.format,'PNG')

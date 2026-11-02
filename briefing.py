@@ -132,6 +132,9 @@ def validate(doc, records, date):
                 raise ValueError('원문에서 근거 인용을 찾을 수 없음')
     if len(doc.get('caption', '')) > 450:
         raise ValueError('Threads 캡션 길이 초과')
+    outlook=sections[9]
+    if len(outlook.get('ideas',[]))!=3 or 'positive' not in outlook or 'negative' not in outlook:
+        raise ValueError('긍정·부정 비교 및 조건부 아이디어 3개 필요')
 
 
 def main():

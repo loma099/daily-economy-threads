@@ -91,8 +91,9 @@ def main():
         raise RuntimeError('당일 게시 시도 이력 있음: 상태 확인 전 재전송 금지')
     api=ThreadsAPI(get_token(repo))
     identity=api.call('GET','/me',{'fields':'id,username'})
-    if identity['id']!=api.user_id or identity.get('username')!=os.environ['THREADS_USERNAME']:
+    if (api.user_id!='0' and identity['id']!=api.user_id) or identity.get('username')!=os.environ['THREADS_USERNAME']:
         raise RuntimeError('게시 계정 불일치')
+    api.user_id=identity['id']
     png=Path('build')/ready['png']
     content=png.read_bytes()
     image_path=f'public/briefing_{today}.png'
