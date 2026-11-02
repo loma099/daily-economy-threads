@@ -26,6 +26,8 @@ def main():
     if identity.get('username')!='lej0954':
         raise RuntimeError('연결된 Threads 계정이 요청한 계정과 다릅니다.')
     debug=api.call('GET','/debug_token',{'input_token':api.token})['data']
+    print('Token metadata (no credentials): '+json.dumps({k:debug.get(k) for k in
+          ('app_id','application','is_valid','scopes','expires_at')},ensure_ascii=False))
     metadata=validate_token_metadata(debug)
     Fernet(os.environ['TOKEN_ENCRYPTION_KEY'].encode())
     result={'username':identity['username'],'user_id':identity['id'],
