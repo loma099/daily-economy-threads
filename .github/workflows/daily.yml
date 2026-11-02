@@ -1,0 +1,33 @@
+name: Daily economic briefing (setup pending)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '35 21 * * *'
+concurrency:
+  group: daily-threads
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: vars.ENABLE_DAILY == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Create verified draft; publishing remains disabled during setup
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+        run: python briefing.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: briefing-review
+          path: build/
+          retention-days: 3
+      # Publishing is deliberately not enabled until OAuth, image hosting,
+      # image QA and durable idempotency have passed an end-to-end live test.
