@@ -117,7 +117,7 @@ def main():
             return
     png=Path('build')/ready['png']
     content=png.read_bytes()
-    image_path=f'public/briefing_{today}.png'
+    image_path=f'public/briefing_{today}_{hashlib.sha256(content).hexdigest()[:12]}.png'
     repo.put(image_path,content,f'Publish verified infographic {today}')
     if preview:
         draft=json.loads(Path('build/draft.json').read_text(encoding='utf-8'))
