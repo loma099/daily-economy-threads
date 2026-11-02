@@ -267,6 +267,16 @@ def quarantine_unsupported(doc, records, date):
     validate(doc,records,date)
 
 
+def normalize_format(doc):
+    # Edit only presentation length, never numbers or factual wording.
+    for section in doc.get('sections',[]):
+        maximum=1 if section.get('number') in (6,7) else 3
+        section['bullets']=section.get('bullets',[])[:maximum]
+        for quote in section.get('evidence_quotes',[]):
+            quote['text']=quote.get('text','')[:140]
+    return doc
+
+
 def main():
     OUT.mkdir(exist_ok=True)
     now = datetime.now(KST)
@@ -303,16 +313,16 @@ def main():
                    'comment':'80자 이내 조건부 코멘트'},
         'evidence': evidence,
     }
-    doc = generate(json.dumps(instruction, ensure_ascii=False))
+    doc = normalize_format(generate(json.dumps(instruction, ensure_ascii=False)))
     (OUT/'initial_draft.json').write_text(json.dumps(doc,ensure_ascii=False,indent=2),encoding='utf-8')
     doc['checked_at'] = now.strftime('검토 마감 %m/%d %H:%M KST')
     try:
         validate(doc, records, now.date().isoformat())
     except ValueError as exc:
-        doc=generate(json.dumps({'task':'이 초안의 구조·근거 인용 오류만 수정. 수치나 사실을 만들어 채우지 않음. '
+        doc=normalize_format(generate(json.dumps({'task':'이 초안의 구조·근거 인용 오류만 수정. 수치나 사실을 만들어 채우지 않음. '
                                  '근거 인용은 article_text에서 그대로 8~140자. '
                                  '불확실한 항목은 확인 불가로 표시. JSON 초안 전체 반환.',
-                                 'validation_error':str(exc),'draft':doc,'requirements':instruction},ensure_ascii=False))
+                                 'validation_error':str(exc),'draft':doc,'requirements':instruction},ensure_ascii=False)))
         doc['checked_at']=now.strftime('검토 마감 %m/%d %H:%M KST')
         quarantine_unsupported(doc,records,now.date().isoformat())
     (OUT/'draft.json').write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding='utf-8')
