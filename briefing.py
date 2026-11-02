@@ -7,6 +7,8 @@ from email.utils import parsedate_to_datetime
 
 import feedparser
 import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse
 
 KST = timezone(timedelta(hours=9))
 OUT = Path('build')
@@ -20,6 +22,7 @@ FEEDS = {
     'BEA': 'https://apps.bea.gov/rss/rss.xml',
     'CNBC markets': 'https://www.cnbc.com/id/100003114/device/rss/rss.html',
     'BBC world': 'https://feeds.bbci.co.uk/news/world/rss.xml',
+    'NVIDIA': 'https://nvidianews.nvidia.com/releases.xml',
 }
 
 
@@ -57,24 +60,49 @@ def collect(now):
             health.append({'publisher': publisher, 'ok': True, 'recent': accepted})
         except (requests.RequestException, ValueError):
             health.append({'publisher': publisher, 'ok': False})
+    # Public article text only; no login, paywall or anti-bot bypass.
+    for record in sorted(records, key=lambda r:r['published'], reverse=True)[:24]:
+        host = urlparse(record['url']).hostname or ''
+        allowed = ('federalreserve.gov','ecb.europa.eu','bls.gov','bea.gov',
+                   'cnbc.com','bbc.co.uk','bbc.com','nvidia.com')
+        if not any(host == h or host.endswith('.'+h) for h in allowed):
+            continue
+        try:
+            article = requests.get(record['url'], timeout=20, allow_redirects=False)
+            article.raise_for_status()
+            if article.is_redirect:
+                continue
+            soup = BeautifulSoup(article.content,'html.parser')
+            for tag in soup(['script','style','nav','header','footer','aside']):
+                tag.decompose()
+            node = soup.find('article') or soup.find('main')
+            if node:
+                record['article_text'] = node.get_text(' ',strip=True)[:14000]
+        except requests.RequestException:
+            pass
     return records, health
 
 
-def generate(prompt):
+def generate(prompt, image_path=None):
     key = os.environ.get('GEMINI_API_KEY', '')
     model = os.environ.get('GEMINI_MODEL', '')
     if not key or not model:
         raise RuntimeError('무료 AI 프로젝트/API 키와 무료 지원 모델 연결이 필요합니다.')
     # Header keeps the key out of the request URL and normal exception logs.
+    parts = [{'text': prompt}]
+    if image_path:
+        import base64
+        parts.append({'inline_data':{'mime_type':'image/png',
+                                     'data':base64.b64encode(Path(image_path).read_bytes()).decode()}})
     response = requests.post(
         f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
         headers={'x-goog-api-key': key}, timeout=150,
-        json={'contents': [{'parts': [{'text': prompt}]}],
+        json={'contents': [{'parts': parts}],
               'generationConfig': {'responseMimeType': 'application/json'}})
     if not response.ok:
         raise RuntimeError(f'AI 호출 중단: HTTP {response.status_code}; 유료 대체 없음')
-    parts = response.json()['candidates'][0]['content']['parts']
-    return json.loads(''.join(part.get('text', '') for part in parts))
+    output_parts = response.json()['candidates'][0]['content']['parts']
+    return json.loads(''.join(part.get('text', '') for part in output_parts))
 
 
 def validate(doc, records, date):
@@ -93,6 +121,15 @@ def validate(doc, records, date):
             raise ValueError('근거 없는 확정 주장')
         if len(section.get('bullets', [])) > 4:
             raise ValueError('본문 길이 초과')
+        if section.get('status') == '확인' and not section.get('evidence_quotes'):
+            raise ValueError('확정 주장에 원문 근거 인용 필요')
+        for quote in section.get('evidence_quotes',[]):
+            source = next((r for r in records if r['id']==quote.get('source_id')),None)
+            phrase=quote.get('text','')
+            if len(phrase.strip())<8 or len(phrase)>180:
+                raise ValueError('근거 인용 길이 오류')
+            if not source or not source.get('article_text') or phrase not in source['article_text']:
+                raise ValueError('원문에서 근거 인용을 찾을 수 없음')
     if len(doc.get('caption', '')) > 450:
         raise ValueError('Threads 캡션 길이 초과')
 
@@ -113,15 +150,23 @@ def main():
                   'RSS 제목과 요약만으로 확인하지 못한 주장은 확정하지 않음',
                   '시장 수치는 거래일·시각·통화·만기·가격 종류를 확인한 경우만 사용',
                   '관찰 아이디어는 조건부 편집자 해석으로 구분. 매수 권유 금지',
-                  'source_ids에는 자료의 id만 사용. 출처 없는 주장 금지'],
+                  'source_ids에는 자료의 id만 사용. 출처 없는 주장 금지',
+                  '확인 상태에는 article_text의 짧은 정확한 evidence_quotes를 포함',
+                  '1~5,8,9번 bullets 최대 3개, 6~7번 최대 1개. 각 문장 최대 38자',
+                  '10번 positive와 negative 각각 최대 3개(문장 최대 14자), ideas 정확히 3개(최대 45자)',
+                  '11번 table은 한국 날짜·시간·이벤트 3열, 확인한 일정 최대 4행. 없으면 확인 불가',
+                  '시장 수치를 포함한 table에는 거래일과 기준시각을 셀에 함께 표시. 공간 부족시 생략'],
         'schema': {'date': 'YYYY-MM-DD', 'caption': '450자 이내',
                    'sections': [{'number': 1, 'topic': '지정된 주제',
                                  'status': '확인 또는 확인 불가',
                                  'title': '짧은 제목', 'bullets': ['최대 4개 짧은 문장'],
-                                 'impact': '조건부 영향', 'source_ids': [1]}]},
+                                 'impact': '조건부 영향', 'source_ids': [1],
+                                 'evidence_quotes':[{'source_id':1,'text':'article_text의 짧은 정확한 구절'}]}],
+                   'comment':'80자 이내 조건부 코멘트'},
         'evidence': evidence,
     }
     doc = generate(json.dumps(instruction, ensure_ascii=False))
+    doc['checked_at'] = now.strftime('검토 마감 %m/%d %H:%M KST')
     validate(doc, records, now.date().isoformat())
     (OUT/'draft.json').write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding='utf-8')
     review = generate(json.dumps({'task': '초안의 모든 주장을 근거와 대조. 근거 부족, 시점 혼동, 숫자 오류면 reject. '
@@ -131,7 +176,23 @@ def main():
     (OUT/'review.json').write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding='utf-8')
     # An LLM approval is only an intermediate signal. Full article retrieval,
     # numeric cross-checks and PNG QA must be connected before auto-publishing.
-    print('초안 저장 완료. 원문·숫자 검증과 PNG 검토·계정 연결 전에는 게시되지 않습니다.')
+    if review.get('approved') is not True or review.get('issues'):
+        raise RuntimeError('근거 대조 검사 미통과: 게시하지 않습니다.')
+    if sum(s.get('status')=='확인' for s in doc['sections']) < 6:
+        raise RuntimeError('확인 가능한 항목 부족: 완성본으로 게시하지 않습니다.')
+    from render import render
+    target = OUT/f'briefing_{now.date().isoformat()}.png'
+    render(doc,target)
+    visual = generate(json.dumps({'task':'첨부 PNG의 11개 항목, 한글, 표, 잘림·겹침·누락을 확인. '
+                                  '초안 내용과 숫자가 일치하는지 검사. '
+                                  'JSON {"approved":boolean,"issues":[string]} 반환.',
+                                  'draft':doc},ensure_ascii=False),target)
+    (OUT/'visual_review.json').write_text(json.dumps(visual,ensure_ascii=False,indent=2),encoding='utf-8')
+    if visual.get('approved') is not True or visual.get('issues'):
+        raise RuntimeError('이미지 검토 미통과: 게시하지 않습니다.')
+    (OUT/'ready.json').write_text(json.dumps({'date':doc['date'],'png':target.name,
+                                             'caption':doc['caption'],'checked_at':now.isoformat()},ensure_ascii=False),encoding='utf-8')
+    print('자료 대조 및 PNG 검사 완료. 게시 단계는 별도 연결이 필요합니다.')
 
 
 if __name__ == '__main__':

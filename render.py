@@ -65,7 +65,7 @@ def render(doc, output):
             draw.line((x*S,y*S+i,(x+w)*S,y*S+i), fill=rgb)
 
     def picture(name, x,y,w,h):
-        path = ROOT/'assets'/f'{name}.jpg'
+        path = ROOT/f'asset_{name}.jpg'
         if path.exists():
             pic = ImageOps.fit(Image.open(path).convert('RGB'), (w*S,h*S))
             im.paste(pic, (x*S,y*S))
@@ -87,7 +87,7 @@ def render(doc, output):
         return y+22*(len(rows)+1)+6
 
     gradient((0,0,922,88), (0,15,49), (0,28,72))
-    earth = ROOT/'assets'/'earth.jpg'
+    earth = ROOT/'asset_earth.jpg'
     if earth.exists():
         im.paste(ImageOps.fit(Image.open(earth).convert('RGB'),(145*S,61*S)),(546*S,0))
     fit(16,9,f'{day.month}/{day.day}({weekday}) Daily 뉴스 브리핑',40,'white',527)
@@ -107,13 +107,14 @@ def render(doc, output):
         fit(x+46,y+9,sec['topic']+' · '+sec.get('title',''),17,'white',392)
         yy = y+41
         if n in (1,2,3,4,5,6,7,8,9):
-            picture(str(n),x+8,yy,128,65)
+            photo_height = min(65, max(30, h-130))
+            picture(str(n),x+8,yy,128,photo_height)
             summary = sec.get('table')
             if summary:
                 yy = table(x+145,yy,summary['headers'],summary['rows'],294)
             else:
                 wrap(x+145,yy,[sec.get('status','확인 불가')],284,y+110,13,19)
-                yy += 72
+                yy += photo_height+7
         if n == 10 and sec.get('positive') is not None:
             rect((x+8,yy,x+219,yy+98),'#f0fff5')
             rect((x+225,yy,x+439,yy+98),'#fff4f3')
