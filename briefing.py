@@ -150,8 +150,8 @@ def collect(now):
     return records, health
 
 
-@lru_cache(maxsize=1)
-def available_model():
+@lru_cache(maxsize=4)
+def available_model(requested=None):
     key=os.environ.get('GEMINI_API_KEY','')
     if not key:
         raise RuntimeError('무료 AI 키 연결 필요')
@@ -164,7 +164,7 @@ def available_model():
     # These models have a documented free tier as checked on 2026-11-02.
     # The project must have no billing account; never choose a paid-only model.
     allowed=['gemini-3.8-flash','gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.1-flash-lite']
-    requested=os.environ.get('GEMINI_MODEL','')
+    requested=requested or os.environ.get('GEMINI_MODEL','')
     if requested in allowed and requested in names:
         selected=requested
     else:
@@ -179,7 +179,7 @@ def generate(prompt, image_path=None):
     key = os.environ.get('GEMINI_API_KEY', '')
     if not key:
         raise RuntimeError('무료 AI 프로젝트/API 키와 무료 지원 모델 연결이 필요합니다.')
-    model=available_model()
+    model=available_model(os.environ.get('GEMINI_VISION_MODEL','gemini-3.1-flash-lite') if image_path else None)
     # Header keeps the key out of the request URL and normal exception logs.
     parts = [{'text': prompt}]
     if image_path:
