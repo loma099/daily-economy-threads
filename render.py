@@ -39,22 +39,28 @@ def render(doc, output):
         text(x, y, value, size, color, width)
 
     def wrap(x, y, values, width, bottom, size=14, step=21):
-        for value in values:
-            line = ''
-            for c in str(value):
-                if draw.textlength(line+c, font=font(size)) > width*S:
-                    if y+size > bottom:
-                        raise ValueError('세로 넘침')
-                    text(x, y, line, size)
-                    y += step
-                    line = c
-                else:
-                    line += c
-            if line:
-                if y+size > bottom:
-                    raise ValueError('세로 넘침')
-                text(x, y, line, size)
-                y += step
+        original=size
+        while size>=10:
+            lines=[]
+            for value in values:
+                line=''
+                for c in str(value):
+                    if line and draw.textlength(line+c,font=font(size))>width*S:
+                        lines.append(line)
+                        line=c
+                    else:
+                        line+=c
+                if line:
+                    lines.append(line)
+            spacing=max(size+3,step*size/original)
+            if not lines or y+(len(lines)-1)*spacing+size<=bottom:
+                break
+            size-=.5
+        else:
+            raise ValueError('세로 넘침')
+        for line in lines:
+            text(x,y,line,size)
+            y+=spacing
         return y
 
     def gradient(box, start=(1,43,95), end=(12,131,190)):
