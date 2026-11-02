@@ -1,6 +1,10 @@
 """Cloud preparation stage. No paid fallback and no publishing side effects."""
 import json
 import os
+import csv
+import io
+from decimal import Decimal, InvalidOperation
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -25,6 +29,61 @@ FEEDS = {
     'BBC world': 'https://feeds.bbci.co.uk/news/world/rss.xml',
     'NVIDIA': 'https://nvidianews.nvidia.com/releases.xml',
 }
+
+SERIES = [
+    ('SP500','S&P500 종가','지수 포인트'),
+    ('DJIA','다우 종가','지수 포인트'),
+    ('NASDAQCOM','나스닥 종가','지수 포인트'),
+    ('DGS2','미국 국채 2년 고정만기 수익률','연 %'),
+    ('DGS10','미국 국채 10년 고정만기 수익률','연 %'),
+    ('DCOILBRENTEU','브렌트 현물 EIA','달러/배럴'),
+    ('DCOILWTICO','WTI 현물 EIA','달러/배럴'),
+    ('DEXKOUS','연준 일별 참고 환율 USD/KRW','원/달러'),
+    ('DEXJPUS','연준 일별 참고 환율 USD/JPY','엔/달러'),
+    ('CBBTCUSD','Coinbase 비트코인 일별 가격','달러/BTC'),
+    ('DFEDTARL','연준 정책금리 목표 하단','연 %'),
+    ('DFEDTARU','연준 정책금리 목표 상단','연 %'),
+]
+
+
+def official_market_sources(now):
+    def fetch(series):
+        sid,label,unit=series
+        try:
+            response=requests.get('https://fred.stlouisfed.org/graph/fredgraph.csv',
+                                  params={'id':sid,'cosd':(now-timedelta(days=16)).date().isoformat(),
+                                          'coed':now.date().isoformat()},timeout=25)
+            response.raise_for_status()
+            reader=csv.DictReader(io.StringIO(response.text.lstrip('\ufeff')))
+            rows=[]
+            for row in reader:
+                stamp=row.get('observation_date') or row.get('DATE')
+                raw=row.get(sid,'')
+                if not stamp or raw in ('','.','NaN'):
+                    continue
+                observed=datetime.fromisoformat(stamp).date()
+                if observed<=now.date():
+                    rows.append((stamp,Decimal(raw)))
+            rows.sort()
+            if len(rows)<2 or (now.date()-datetime.fromisoformat(rows[-1][0]).date()).days>7:
+                return None
+            (prior_date,prior),(observed,value)=rows[-2:]
+            text=f'{label}; 시계열 {sid}; 단위 {unit}; 최근 공개 관측일 {observed}; 값 {value}; 이전 관측일 {prior_date}; 값 {prior}.'
+            if sid in ('DGS2','DGS10'):
+                change=((value-prior)*100).quantize(Decimal('.01'))
+                text+=f' 이전 관측 대비 {change:+}bp (프로그램 계산, 1%p=100bp).'
+            elif prior and sid not in ('DFEDTARL','DFEDTARU'):
+                change=((value/prior-1)*100).quantize(Decimal('.01'))
+                text+=f' 이전 관측 대비 {change:+}% (프로그램 계산).'
+            text+=' 조회 시각은 발표일이 아니며, 장중·실시간 시세 또는 선물 가격이 아님. 자료 공개 지연 가능.'
+            return {'publisher':'FRED / '+sid,'url':'https://fred.stlouisfed.org/series/'+sid,
+                    'published':None,'observed_date':observed,'retrieved_at':now.isoformat(),
+                    'title':label+' 최근 공개 자료','data_type':'official_timeseries',
+                    'excerpt':text,'article_text':text}
+        except (requests.RequestException,ValueError,InvalidOperation):
+            return None
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        return [record for record in pool.map(fetch,SERIES) if record]
 
 
 def collect(now):
@@ -81,6 +140,9 @@ def collect(now):
                 record['article_text'] = node.get_text(' ',strip=True)[:14000]
         except requests.RequestException:
             pass
+    for record in official_market_sources(now):
+        record['id']=len(records)+1
+        records.append(record)
     return records, health
 
 
@@ -186,6 +248,10 @@ def main():
                   '관찰 아이디어는 조건부 편집자 해석으로 구분. 매수 권유 금지',
                   'source_ids에는 자료의 id만 사용. 출처 없는 주장 금지',
                   '확인 상태에는 article_text의 짧은 정확한 evidence_quotes를 포함',
+                  '각 근거 인용은 원문에서 그대로 복사한 8~140자. 생략 부호나 번역으로 바꾸지 않음',
+                  'official_timeseries는 최근 공개 관측일 자료이며 조회 시각이 발표일이 아님',
+                  '시계열 관측일을 표나 문장에 명시. 장중·실시간·당일 최신 종가로 단정하지 않음',
+                  'EIA 유가는 현물, DGS는 고정만기 수익률, 환율은 연준 참고 환율이며 종류를 바꾸지 않음',
                   '1~5,8,9번 bullets 최대 3개, 6~7번 최대 1개. 각 문장 최대 38자',
                   '10번 positive와 negative 각각 최대 3개(문장 최대 14자), ideas 정확히 3개(최대 45자)',
                   '11번 table은 한국 날짜·시간·이벤트 3열, 확인한 일정 최대 4행. 없으면 확인 불가',
@@ -201,7 +267,15 @@ def main():
     }
     doc = generate(json.dumps(instruction, ensure_ascii=False))
     doc['checked_at'] = now.strftime('검토 마감 %m/%d %H:%M KST')
-    validate(doc, records, now.date().isoformat())
+    try:
+        validate(doc, records, now.date().isoformat())
+    except ValueError as exc:
+        doc=generate(json.dumps({'task':'이 초안의 구조·근거 인용 오류만 수정. 수치나 사실을 만들어 채우지 않음. '
+                                 '근거 인용은 article_text에서 그대로 8~140자. '
+                                 '불확실한 항목은 확인 불가로 표시. JSON 초안 전체 반환.',
+                                 'validation_error':str(exc),'draft':doc,'requirements':instruction},ensure_ascii=False))
+        doc['checked_at']=now.strftime('검토 마감 %m/%d %H:%M KST')
+        validate(doc,records,now.date().isoformat())
     (OUT/'draft.json').write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding='utf-8')
     review = generate(json.dumps({'task': '초안의 모든 주장을 근거와 대조. 근거 부족, 시점 혼동, 숫자 오류면 reject. '
                                   '서로 다른 자료의 같은 사실을 교차 확인. 원문을 읽지 못한 것은 verified로 보지 않음. '

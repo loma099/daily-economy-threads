@@ -21,7 +21,7 @@
 
 Secrets: `GEMINI_API_KEY`, `THREADS_ACCESS_TOKEN` (장기 사용자 토큰), `TOKEN_ENCRYPTION_KEY` (Fernet 암호화 키).
 
-Variables: `GEMINI_MODEL`(기본값 gemini-2.5-flash, 무료 프로젝트만 사용), `THREADS_USER_ID`(선택), `ENABLE_DAILY`(시험 통과 후 `true`). 게시 계정은 lej0954로 검사합니다. 공개 PNG는 이 전용 저장소의 raw 주소를 사용합니다.
+Variables: `GEMINI_MODEL`(무료 지원 목록과 제공 여부를 확인해 선택), `THREADS_USER_ID`(선택), `ENABLE_DAILY`(시험 통과 후 `true`). 신규 프로젝트에서 Gemini 2.5 Flash가 HTTP 404를 반환하는 것을 확인해 후보에서 제외했습니다. 2026-11-02 공식 가격표상 무료 등급을 지원하는 3.8 Flash 등만 허용합니다. 게시 계정은 lej0954로 검사합니다. 공개 PNG는 이 전용 저장소의 raw 주소를 사용합니다.
 
 Threads 장기 토큰은 만료 전에 갱신해야 합니다. 게시 모듈은 주기적으로 갱신하고 암호화한 토큰만 전용 저장소에 저장하도록 작성했습니다. 평문 토큰은 Secret에만 둡니다. 이 경로의 실제 시험은 아직 완료되지 않았습니다. 만료·취소·갱신 실패 시 게시를 중단합니다.
 

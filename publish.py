@@ -99,7 +99,7 @@ def main():
     image_path=f'public/briefing_{today}.png'
     repo.put(image_path,content,f'Publish verified infographic {today}')
     sources=json.loads(Path('build/sources.json').read_text(encoding='utf-8'))
-    source_list='\n'.join(f"- {s['publisher']} | {s['published']} | {s['url']}" for s in sources['sources'])
+    source_list='\n'.join(f"- {s['publisher']} | 관측/발행일: {s.get('observed_date') or s.get('published') or '확인 불가'} | {s['url']}" for s in sources['sources'])
     # Publish URLs and dates only, never scraped full articles or auth data.
     repo.put(f'public/sources_{today}.md',
              (f"# {today}\n기준 시각: {sources['checked_at']}\n\n"+source_list).encode('utf-8'),
