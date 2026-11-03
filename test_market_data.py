@@ -63,6 +63,8 @@ class DataChecks(unittest.TestCase):
         self.assertTrue(all(s['status']=='확인 불가' for s in doc['sections']))
         self.assertEqual(len(doc['sections'][9]['ideas']),3)
         self.assertEqual(doc['sections'][9]['positive'],[])
+        self.assertIn('공식 일정 확인 필요',str(doc['sections'][10]['table']))
+        self.assertIn('부재를 의미하지 않음',doc['sections'][10]['impact'])
 
     def test_yield_change_is_basis_points_and_has_observation_date(self):
         response=Mock(text='observation_date,DGS10\n2026-10-29,4.10\n2026-10-30,4.08\n')
