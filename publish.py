@@ -144,10 +144,8 @@ def main():
         time.sleep(min(30,(target-datetime.now(KST)).total_seconds()))
     if datetime.now(KST).date().isoformat()!=today:
         raise RuntimeError('게시 전 날짜 변경됨')
-    caption=ready['caption']
-    if today not in caption:
-        caption=today+' 경제 브리핑\n'+caption
-    container=api.create_image(url,caption)
+    # User preference: one briefing image, with no visible post text.
+    container=api.create_image(url)
     pending={'date':today,'status':'prepared','container_id':container,
              'image_sha256':hashlib.sha256(content).hexdigest(),'image_url':url,
              'attempted_at':datetime.now(KST).isoformat()}
