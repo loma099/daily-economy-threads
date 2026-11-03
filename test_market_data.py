@@ -24,6 +24,14 @@ class DataChecks(unittest.TestCase):
             self.assertEqual(generate('test'),{'approved':True})
         self.assertEqual(post.call_count,2)
 
+    def test_overloaded_model_switches_to_another_free_model(self):
+        busy=Mock(status_code=503,ok=False)
+        ready=Mock(status_code=200,ok=True)
+        ready.json.return_value={'candidates':[{'content':{'parts':[{'text':'{"approved":true}'}]}}]}
+        with patch.dict('os.environ',{'GEMINI_API_KEY':'test-only'}),patch('briefing.available_model',side_effect=['gemini-3.1-flash-lite','gemini-3.5-flash-lite']),patch('briefing.requests.post',side_effect=[busy,busy,ready]) as post,patch('briefing.time.sleep'):
+            self.assertEqual(generate('test'),{'approved':True})
+        self.assertIn('gemini-3.5-flash-lite',post.call_args.args[0])
+
     def test_unverified_number_is_withheld_without_relaxing_validation(self):
         sections=[{'number':n,'topic':topic,'status':'확인 불가','source_ids':[],
                    'title':'확인 불가','bullets':[]} for n,topic in enumerate(TOPICS,1)]
