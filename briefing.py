@@ -294,6 +294,13 @@ def normalize_format(doc):
             'impact':'추가 근거 확인 전 판단 보류','source_ids':[],'evidence_quotes':[]}
         sections.append(section)
     doc['sections']=sections
+    if sections[10].get('status') != '확인':
+        sections[10].update(title='이번 주 공식 경제일정 · 미확인',
+            bullets=['수집 자료에서 공식 일정을 확인하지 못함'],
+            impact='일정 부재를 의미하지 않음 · 공식 발표 재확인',
+            table={'headers':['한국 날짜','시간','이벤트'],
+                   'rows':[['이번 주','미확인','공식 일정 확인 필요']]},
+            source_ids=[],evidence_quotes=[])
     outlook=sections[9]
     for field in ('positive','negative'):
         if not isinstance(outlook.get(field),list):
@@ -388,6 +395,7 @@ def main():
         'rules': ['기억으로 숫자·현재 시세·종가·일정을 채우지 않음',
                   '제공 자료에 근거가 없으면 확인 불가. 신규 발표 없음으로 단정하지 않음',
                   'RSS 제목과 요약만으로 확인하지 못한 주장은 확정하지 않음',
+                  '미확인과 없음은 다름. 공식 일정이 확인되지 않으면 공식 일정 확인 필요로 표시',
                   '시장 수치는 거래일·시각·통화·만기·가격 종류를 확인한 경우만 사용',
                   '관찰 아이디어는 조건부 편집자 해석으로 구분. 매수 권유 금지',
                   'source_ids에는 자료의 id만 사용. 출처 없는 주장 금지',
