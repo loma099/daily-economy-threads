@@ -163,7 +163,7 @@ def available_model(requested=None):
            if 'generateContent' in m.get('supportedGenerationMethods',[])}
     # These models have a documented free tier as checked on 2026-11-02.
     # The project must have no billing account; never choose a paid-only model.
-    allowed=['gemini-3.8-flash','gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.1-flash-lite']
+    allowed=['gemini-3.1-flash-lite','gemini-3.5-flash-lite','gemini-3.8-flash','gemini-3.6-flash']
     requested=requested or os.environ.get('GEMINI_MODEL','')
     if requested in allowed and requested in names:
         selected=requested
@@ -188,7 +188,13 @@ def generate(prompt, image_path=None):
                                      'data':base64.b64encode(Path(image_path).read_bytes()).decode()}})
     config={'responseMimeType':'application/json','maxOutputTokens':12000,
             'thinkingConfig':{'thinkingLevel':'LOW'}}
+    # Retry generation only; publishing is never retried here.
     for attempt in range(4):
+        if attempt == 2:
+            fallback = available_model('gemini-3.5-flash-lite' if model == 'gemini-3.1-flash-lite' else 'gemini-3.1-flash-lite')
+            if fallback != model:
+                model = fallback
+                print('일시 장애: 검증된 무료 모델로 제작 요청 전환 '+model, flush=True)
         try:
             response = requests.post(
                 f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
