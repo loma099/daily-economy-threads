@@ -45,6 +45,18 @@ class DataChecks(unittest.TestCase):
         self.assertEqual(sections[8]['status'],'확인 불가')
         self.assertNotIn('32',str(sections[8]['bullets']))
 
+    def test_invented_quote_is_withheld_instead_of_accepted(self):
+        sections=[{'number':n,'topic':topic,'status':'확인 불가','source_ids':[],
+                   'title':'확인 불가','bullets':[]} for n,topic in enumerate(TOPICS,1)]
+        sections[6].update(status='확인',source_ids=[1],bullets=['확인되지 않은 주장'],
+                           evidence_quotes=[{'source_id':1,'text':'This quote does not exist in the source'}])
+        sections[9].update(positive=[],negative=[],ideas=['관찰']*3)
+        doc={'date':'2026-11-03','sections':sections,'caption':''}
+        quarantine_unsupported(doc,[{'id':1,'article_text':'Different source wording here'}],'2026-11-03')
+        self.assertEqual(sections[6]['status'],'확인 불가')
+        self.assertEqual(sections[6]['source_ids'],[])
+        self.assertNotIn('확인되지 않은 주장',str(sections[6]['bullets']))
+
     def test_yield_change_is_basis_points_and_has_observation_date(self):
         response=Mock(text='observation_date,DGS10\n2026-10-29,4.10\n2026-10-30,4.08\n')
         with patch('briefing.SERIES',[('DGS10','미국 10년','연 %')]),patch('briefing.requests.get',return_value=response):
