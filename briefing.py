@@ -315,6 +315,10 @@ def attach_official_tables(doc,records):
             if not sec.get('table'):
                 sec['table']={'headers':headers,'rows':[['확인 불가','—','—']]}
             continue
+        # This card is fully replaced with deterministic official data below.
+        # Remove the discarded AI prose's citations as well.
+        sec['source_ids']=[]
+        sec['evidence_quotes']=[]
         rows=[]
         for r,label in selected:
             stamp=r['observed_date'][5:]
