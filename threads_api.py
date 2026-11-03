@@ -29,11 +29,13 @@ class ThreadsAPI:
             raise RuntimeError(f'Threads 요청 중단: HTTP {response.status_code}')
         return response.json()
 
-    def create_image(self, image_url, caption):
-        if not image_url.startswith('https://') or len(caption) > 500:
+    def create_image(self, image_url, caption=None):
+        if not image_url.startswith('https://') or (caption is not None and len(caption) > 500):
             raise ValueError('HTTPS public image URL / caption required')
-        return self.call('POST', f'/{self.user_id}/threads', {
-            'media_type': 'IMAGE', 'image_url': image_url, 'text': caption})['id']
+        values = {'media_type': 'IMAGE', 'image_url': image_url}
+        if caption:
+            values['text'] = caption
+        return self.call('POST', f'/{self.user_id}/threads', values)['id']
 
     def container_status(self, container_id):
         return self.call('GET', '/'+container_id, {'fields': 'status,error_message'})
