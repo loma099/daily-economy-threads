@@ -18,6 +18,17 @@ class PublishingChecks(unittest.TestCase):
         self.assertNotIn('test-secret', args[1])
         self.assertEqual(kwargs['data']['media_type'], 'IMAGE')
 
+    def test_image_only_request_omits_text_and_does_not_publish(self):
+        session=Mock()
+        response=Mock(ok=True)
+        response.json.return_value={'id':'1234'}
+        session.request.return_value=response
+        api=ThreadsAPI('test-secret','99',session)
+        self.assertEqual(api.create_image('https://example.org/today.png'),'1234')
+        self.assertEqual(session.request.call_count,1)
+        self.assertEqual(session.request.call_args.kwargs['data'],
+                         {'media_type':'IMAGE','image_url':'https://example.org/today.png'})
+
     def test_timeout_is_not_retried_or_secret_exposed(self):
         session = Mock()
         session.request.side_effect = requests.Timeout('test-secret')
