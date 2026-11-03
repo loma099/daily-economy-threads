@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock,patch
 from datetime import datetime,timezone,timedelta
-from briefing import official_market_sources,available_model,generate,quarantine_unsupported,attach_official_tables,TOPICS
+from briefing import official_market_sources,available_model,generate,quarantine_unsupported,attach_official_tables,TOPICS,normalize_format
 
 
 class DataChecks(unittest.TestCase):
@@ -56,6 +56,13 @@ class DataChecks(unittest.TestCase):
         self.assertEqual(sections[6]['status'],'확인 불가')
         self.assertEqual(sections[6]['source_ids'],[])
         self.assertNotIn('확인되지 않은 주장',str(sections[6]['bullets']))
+
+    def test_missing_cards_are_explicitly_unknown_and_outlook_is_conditional(self):
+        doc=normalize_format({'date':'2026-11-03','sections':[]})
+        self.assertEqual(len(doc['sections']),11)
+        self.assertTrue(all(s['status']=='확인 불가' for s in doc['sections']))
+        self.assertEqual(len(doc['sections'][9]['ideas']),3)
+        self.assertEqual(doc['sections'][9]['positive'],[])
 
     def test_yield_change_is_basis_points_and_has_observation_date(self):
         response=Mock(text='observation_date,DGS10\n2026-10-29,4.10\n2026-10-30,4.08\n')
