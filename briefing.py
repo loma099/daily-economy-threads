@@ -283,6 +283,24 @@ def quarantine_unsupported(doc, records, date):
 
 
 def normalize_format(doc):
+    # Missing/malformed cards get explicit unknown placeholders, never invented facts.
+    supplied=doc.get('sections',[])
+    sections=[]
+    for number,topic in enumerate(TOPICS,1):
+        matches=[s for s in supplied if s.get('number')==number and s.get('topic')==topic]
+        section=matches[0] if len(matches)==1 else {
+            'number':number,'topic':topic,'status':'확인 불가',
+            'title':topic+' · 확인 불가','bullets':['수집 자료에서 검증한 내용 없음'],
+            'impact':'추가 근거 확인 전 판단 보류','source_ids':[],'evidence_quotes':[]}
+        sections.append(section)
+    doc['sections']=sections
+    outlook=sections[9]
+    for field in ('positive','negative'):
+        if not isinstance(outlook.get(field),list):
+            outlook[field]=[]
+    defaults=['공식 자료 추가 발표 시 재확인','관측일을 맞춘 뒤 자산 흐름 비교','확인되지 않은 주장에 따른 판단 보류']
+    if not isinstance(outlook.get('ideas'),list) or len(outlook['ideas'])!=3:
+        outlook['ideas']=defaults
     # Edit only presentation length, never numbers or factual wording.
     for section in doc.get('sections',[]):
         maximum=1 if section.get('number') in (6,7) else 3
