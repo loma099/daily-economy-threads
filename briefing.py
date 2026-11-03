@@ -237,14 +237,14 @@ def validate(doc, records, date):
         if len(section.get('bullets', [])) > 4:
             raise ValueError('본문 길이 초과')
         if section.get('status') == '확인' and not section.get('evidence_quotes'):
-            raise ValueError('확정 주장에 원문 근거 인용 필요')
+            raise ValueError(f'{n}번 항목: 확정 주장에 원문 근거 인용 필요')
         for quote in section.get('evidence_quotes',[]):
             source = next((r for r in records if r['id']==quote.get('source_id')),None)
             phrase=quote.get('text','')
             if len(phrase.strip())<8 or len(phrase)>180:
-                raise ValueError('근거 인용 길이 오류')
+                raise ValueError(f'{n}번 항목: 근거 인용 길이 오류')
             if not source or not source.get('article_text') or phrase not in source['article_text']:
-                raise ValueError('원문에서 근거 인용을 찾을 수 없음')
+                raise ValueError(f'{n}번 항목: 원문에서 근거 인용을 찾을 수 없음')
         if section.get('status')=='확인':
             evidence=' '.join(r.get('article_text','') for r in records if r['id'] in section['source_ids'])
             def numbers(text):
@@ -269,14 +269,16 @@ def quarantine_unsupported(doc, records, date):
             validate(doc, records, date)
             return
         except ValueError as exc:
-            match=re.match(r'(\d+)번 항목: 인용 원문에 없는 숫자 ',str(exc))
+            match=re.match(r'(\d+)번 항목: (?:인용 원문에 없는 숫자 |확정 주장에 원문 근거 인용 필요|근거 인용 길이 오류|원문에서 근거 인용을 찾을 수 없음)',str(exc))
             if not match:
                 raise
             section=doc['sections'][int(match.group(1))-1]
             print('수치 확인 보류: '+str(exc))
-            section.update(status='확인 불가', title=section['topic']+' · 수치 재확인 필요',
-                           bullets=['수집 원문과 숫자 대조 미통과', '확인되지 않은 수치·주장은 표시하지 않음'],
-                           impact='추가 확인 전 판단 보류',table=None,evidence_quotes=[])
+            section.update(status='확인 불가', title=section['topic']+' · 근거 재확인 필요',
+                           bullets=['수집 원문과 근거 대조 미통과', '확인되지 않은 수치·주장은 표시하지 않음'],
+                           impact='추가 확인 전 판단 보류',table=None,evidence_quotes=[],source_ids=[])
+            if section['number']==10:
+                section.update(positive=[],negative=[],ideas=['공식 자료 추가 발표 시 재확인','관측일을 맞춘 뒤 자산 흐름 비교','확인되지 않은 주장에 따른 판단 보류'])
     validate(doc,records,date)
 
 
@@ -404,14 +406,23 @@ def main():
         attach_official_tables(doc,records)
         quarantine_unsupported(doc,records,now.date().isoformat())
     (OUT/'draft.json').write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding='utf-8')
-    review = generate(json.dumps({'task': '초안의 모든 주장을 근거와 대조. 근거 부족, 시점 혼동, 숫자 오류면 reject. '
-                                  '서로 다른 자료의 같은 사실을 교차 확인. 원문을 읽지 못한 것은 verified로 보지 않음. '
-                                  'JSON {"approved":boolean,"issues":[string]} 반환.',
-                                  'draft': doc, 'evidence': evidence}, ensure_ascii=False))
-    (OUT/'review.json').write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding='utf-8')
-    print('초안 근거 검토: '+json.dumps(review,ensure_ascii=False))
-    if review.get('approved') is not True or review.get('issues'):
-        raise RuntimeError('근거 대조 검사 미통과: 게시하지 않습니다.')
+    for review_attempt in range(2):
+        review = generate(json.dumps({'task': '초안의 모든 주장을 근거와 대조. 근거 부족, 시점 혼동, 숫자 오류면 reject. '
+                                      '서로 다른 자료의 같은 사실을 교차 확인. 원문을 읽지 못한 것은 verified로 보지 않음. '
+                                      'JSON {"approved":boolean,"issues":[string]} 반환.',
+                                      'draft': doc, 'evidence': evidence}, ensure_ascii=False))
+        (OUT/'review.json').write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding='utf-8')
+        print('초안 근거 검토: '+json.dumps(review,ensure_ascii=False))
+        if review.get('approved') is True and not review.get('issues'):
+            break
+        if review_attempt == 1:
+            raise RuntimeError('근거 대조 검사 미통과: 게시하지 않습니다.')
+        doc=attach_official_tables(normalize_format(generate(json.dumps({
+            'task':'독립 검토 지적을 원문과 대조해 수정. 근거 없는 주장은 삭제하거나 확인 불가로 표시. 원문에 없는 인용 생성 금지. JSON 초안 전체 반환.',
+            'issues':review['issues'],'draft':doc,'requirements':instruction},ensure_ascii=False))),records)
+        doc['checked_at']=now.strftime('검토 마감 %m/%d %H:%M KST')
+        quarantine_unsupported(doc,records,now.date().isoformat())
+        (OUT/'draft.json').write_text(json.dumps(doc,ensure_ascii=False,indent=2),encoding='utf-8')
     finish_image(doc,now)
 
 
