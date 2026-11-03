@@ -1,0 +1,75 @@
+name: Record verified manual image replacement
+on:
+  workflow_dispatch:
+    inputs:
+      permalink:
+        description: 'Exact URL of the user-approved same-day image-only replacement'
+        type: string
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: daily-threads
+  cancel-in-progress: false
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Verify account, image, date and empty text before updating receipt
+        env:
+          EXPECTED_PERMALINK: ${{ inputs.permalink }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          THREADS_USERNAME: lej0954
+        run: |
+          python - <<'PY'
+          import json, os
+          from datetime import datetime
+          from urllib.parse import urlparse
+          from publish import Repository, get_token, KST
+          from threads_api import ThreadsAPI
+          target=os.environ['EXPECTED_PERMALINK'].rstrip('/')
+          parsed=urlparse(target)
+          if parsed.scheme!='https' or parsed.netloc!='www.threads.com' or not parsed.path.startswith('/@lej0954/post/'):
+              raise SystemExit('Unexpected replacement URL')
+          repo=Repository()
+          api=ThreadsAPI(get_token(repo))
+          identity=api.call('GET','/me',{'fields':'id,username'})
+          if identity.get('username')!=os.environ['THREADS_USERNAME']:
+              raise SystemExit('Account mismatch')
+          recent=api.call('GET','/'+identity['id']+'/threads',
+                          {'fields':'id,permalink,timestamp,text,media_type','limit':25})
+          found=[p for p in recent.get('data',[]) if p.get('permalink','').rstrip('/')==target]
+          if len(found)!=1:
+              raise SystemExit('Exact replacement not found; receipt unchanged')
+          post=found[0]
+          today=datetime.now(KST).date().isoformat()
+          stamp=datetime.fromisoformat(post['timestamp'].replace('Z','+00:00'))
+          if stamp.astimezone(KST).date().isoformat()!=today or post.get('text','').strip() or post.get('media_type')!='IMAGE':
+              raise SystemExit('Replacement must be same-day single image with no text')
+          path='.state/'+today+'.json'
+          raw,_=repo.get(path)
+          if not raw:
+              raise SystemExit('Original receipt missing; manual inspection required')
+          old=json.loads(raw)
+          if old.get('status')!='published' or old.get('date')!=today:
+              raise SystemExit('Unexpected existing state; receipt unchanged')
+          if old.get('post_id')==post['id']:
+              print('Replacement already recorded')
+              raise SystemExit(0)
+          repo.put('.state/archive/'+today+'_'+old['post_id']+'.json',raw,'Preserve archived original receipt')
+          receipt={**old,'post_id':post['id'],'permalink':target,
+                   'published_at':stamp.astimezone(KST).isoformat(),
+                   'replaced_archived_post_id':old['post_id'],
+                   'source':'user_approved_manual_image_only_replacement',
+                   'checked_at':datetime.now(KST).isoformat()}
+          repo.put(path,json.dumps(receipt,ensure_ascii=False).encode(),'Record verified image-only replacement '+today)
+          print('Verified image-only replacement receipt saved: '+target)
+          PY
