@@ -8,6 +8,7 @@ class DataChecks(unittest.TestCase):
     def test_official_yield_table_keeps_value_date_and_bp_unit(self):
         doc={'sections':[{'number':n,'topic':topic,'status':'확인 불가'}
                          for n,topic in enumerate(TOPICS,1)]}
+        doc['sections'][1].update(source_ids=[999],evidence_quotes=[{'source_id':999,'text':'discarded unverified AI wording'}])
         record={'id':7,'series_id':'DGS10','observed_date':'2026-10-30',
                 'value':'4.08','change':'-2.00','article_text':'미국 국채 10년 고정만기 수익률; 연 4.08%; -2.00bp'}
         attach_official_tables(doc,[record])
@@ -15,6 +16,7 @@ class DataChecks(unittest.TestCase):
         self.assertEqual(section['table']['headers'],['만기·관측일','연 %','변동 bp'])
         self.assertEqual(section['table']['rows'],[['10년 10-30','4.08','-2.00']])
         self.assertEqual(section['source_ids'],[7])
+        self.assertEqual(section['evidence_quotes'],[{'source_id':7,'text':record['article_text']}])
 
     def test_temporary_ai_overload_retries_creation_only(self):
         busy=Mock(status_code=503,ok=False)
