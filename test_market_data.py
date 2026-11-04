@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock,patch
 from datetime import datetime,timezone,timedelta
-from briefing import official_market_sources,available_model,generate,quarantine_unsupported,attach_official_tables,TOPICS,normalize_format
+from briefing import official_market_sources,available_model,generate,quarantine_unsupported,attach_official_tables,TOPICS,normalize_format,align_stock_dates,attach_editorial_and_calendar
 
 
 class DataChecks(unittest.TestCase):
@@ -65,6 +65,25 @@ class DataChecks(unittest.TestCase):
         self.assertEqual(doc['sections'][9]['positive'],[])
         self.assertIn('공식 일정 확인 필요',str(doc['sections'][10]['table']))
         self.assertIn('부재를 의미하지 않음',doc['sections'][10]['impact'])
+
+    def test_stock_table_aligns_to_common_observation_date(self):
+        records=[{'series_id':sid,'title':sid,'observations':history} for sid,history in [
+            ('SP500',[('2026-10-30','100'),('2026-11-02','101')]),
+            ('DJIA',[('2026-10-30','200'),('2026-11-02','204'),('2026-11-03','206')])]]
+        align_stock_dates(records)
+        self.assertEqual([r['observed_date'] for r in records],['2026-11-02']*2)
+        self.assertEqual(records[1]['value'],'204')
+        self.assertEqual(records[1]['change'],'2.00')
+
+    def test_next_week_conference_is_not_used_as_this_week_calendar(self):
+        doc=normalize_format({'date':'2026-11-04','sections':[]})
+        doc['sections'][10].update(status='확인',table={'headers':['날짜','시간','행사'],
+            'rows':[['11/10','미정','평화 회담']]})
+        attach_editorial_and_calendar(doc,[],'2026-11-04')
+        self.assertEqual(doc['sections'][10]['status'],'확인 불가')
+        self.assertNotIn('11/10',str(doc['sections'][10]))
+        self.assertIn('11/02~11/08',str(doc['sections'][10]))
+        self.assertEqual(len(doc['sections'][9]['ideas']),3)
 
     def test_yield_change_is_basis_points_and_has_observation_date(self):
         response=Mock(text='observation_date,DGS10\n2026-10-29,4.10\n2026-10-30,4.08\n')
