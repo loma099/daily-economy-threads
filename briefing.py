@@ -83,11 +83,66 @@ def official_market_sources(now):
                     'published':None,'observed_date':observed,'retrieved_at':now.isoformat(),
                     'title':label+' 최근 공개 자료','data_type':'official_timeseries',
                     'excerpt':text,'article_text':text,'series_id':sid,'value':str(value),
+                    'observations':[(stamp,str(v)) for stamp,v in rows],
                     'change':str(change) if sid not in ('DFEDTARL','DFEDTARU') else None}
         except (requests.RequestException,ValueError,InvalidOperation):
             return None
     with ThreadPoolExecutor(max_workers=4) as pool:
-        return [record for record in pool.map(fetch,SERIES) if record]
+        result=[record for record in pool.map(fetch,SERIES) if record]
+    align_stock_dates(result)
+    for record in result:
+        record.pop('observations',None)
+    return result
+
+
+def align_stock_dates(records):
+    stocks=[r for r in records if r.get('series_id') in ('SP500','DJIA','NASDAQCOM')]
+    if len(stocks)<2:
+        return
+    days=[{stamp for stamp,value in r.get('observations',[])} for r in stocks]
+    common=set.intersection(*days)
+    if not common:
+        raise RuntimeError('주가지수 공통 관측일 확인 불가')
+    date=max(common)
+    for record in stocks:
+        history=[(stamp,Decimal(value)) for stamp,value in record['observations'] if stamp<=date]
+        if len(history)<2:
+            raise RuntimeError('주가지수 공통일 전일 대비 계산 불가')
+        (prior_date,prior),(observed,value)=history[-2:]
+        change=((value/prior-1)*100).quantize(Decimal('.01'))
+        record.update(observed_date=observed,value=str(value),change=str(change))
+        text=(f"{record['title']}; 시계열 {record['series_id']}; 공통 관측일 {observed}; "
+              f"값 {value} 지수 포인트; 이전 관측일 {prior_date}; 값 {prior}; "
+              f"이전 관측 대비 {change:+}% (프로그램 계산). "
+              '공통 관측일 비교를 위해 더 최근 단독 관측값은 사용하지 않음. 실시간 시세 아님.')
+        record['article_text']=record['excerpt']=text
+
+
+def attach_editorial_and_calendar(doc,records,date):
+    # Conditional scenarios are editorial definitions, not claims of current events.
+    market=[r for r in records if r.get('data_type')=='official_timeseries']
+    outlook=doc['sections'][9]
+    outlook.update(title='조건부 시나리오 · 현재 사실과 구분',
+        status='확인' if market else '확인 불가',
+        source_ids=[r['id'] for r in market],
+        evidence_quotes=[{'source_id':r['id'],'text':r['article_text'][:140]} for r in market],
+        bullets=[],table=None,positive=['금리 안정 시 부담 완화','유가 하락 시 물가 완화','환율 안정 시 변동 완화'],
+        negative=['금리 상승 시 부담','유가 상승 시 물가 압력','환율 급등 시 변동성'],
+        ideas=['금리가 하락할 경우 성장주 흐름을 함께 관찰',
+               '유가가 상승할 경우 물가 부담과 업종 차이를 점검',
+               '환율 변동이 커질 경우 해외자산 평가액 변화를 확인'],
+        impact='조건부 편집자 해석 · 상승·하락을 예측한 주장이 아님')
+    start=datetime.fromisoformat(date).date()
+    monday=start-timedelta(days=start.weekday())
+    sunday=monday+timedelta(days=6)
+    # No machine-readable official event calendar is connected yet.
+    # News conference dates must not be substituted for economic releases.
+    doc['sections'][10].update(status='확인 불가',title='공식 경제일정 · 추가 확인 필요',
+        source_ids=[],evidence_quotes=[],bullets=[],
+        table={'headers':['이번 주 한국 날짜','시간','이벤트'],
+               'rows':[[f'{monday:%m/%d}~{sunday:%m/%d}','미확인','공식 일정 확인 필요']]},
+        impact='일정 미확인 · 발표나 행사가 없다는 뜻이 아님')
+    return doc
 
 
 def collect(now):
@@ -362,6 +417,8 @@ def attach_official_tables(doc,records):
                  5:'참고환율과 실제 거래환율의 차이에 유의',6:'가상자산 변동성 및 거래소 위험을 함께 관찰'}
         sec.update(status='확인',table={'headers':headers,'rows':rows},bullets=[note],
                    title=titles[n],impact=impacts[n])
+    if doc.get('date'):
+        attach_editorial_and_calendar(doc,records,doc['date'])
     schedule=doc['sections'][10]
     if not schedule.get('table'):
         schedule['table']={'headers':['한국 날짜','시간','이벤트'],
@@ -372,6 +429,7 @@ def attach_official_tables(doc,records):
 def main():
     OUT.mkdir(exist_ok=True)
     now = datetime.now(KST)
+    print('자료 수집 시작: '+now.isoformat(),flush=True)
     if os.environ.get('RECHECK_REVIEWED')=='true':
         evidence=json.loads((OUT/'sources.json').read_text(encoding='utf-8'))
         checked=datetime.fromisoformat(evidence['checked_at'])
@@ -408,7 +466,9 @@ def main():
                   '10번 positive와 negative 각각 최대 3개(문장 최대 14자), ideas 정확히 3개(최대 45자)',
                   '11번 table은 한국 날짜·시간·이벤트 3열, 확인한 일정 최대 4행. 없으면 확인 불가',
                   '시장 수치를 포함한 table에는 거래일과 기준시각을 셀에 함께 표시. 공간 부족시 생략',
-                  '숫자는 인용 article_text에 실제 있는 숫자 그대로 사용. 단위 변환·반올림 금지'],
+                  '숫자는 인용 article_text에 실제 있는 숫자 그대로 사용. 단위 변환·반올림 금지',
+                  '사망·부상 수처럼 사건 범위가 혼동될 수 있는 수치는 빼고 확인한 사건만 간결히 설명',
+                  '10번 조건부 관찰과 11번 경제일정은 코드에서 별도 생성하므로 확인 불가로 빈 칸 유지'],
         'schema': {'date': 'YYYY-MM-DD', 'caption': '450자 이내',
                    'sections': [{'number': 1, 'topic': '지정된 주제',
                                  'status': '확인 또는 확인 불가',
@@ -432,16 +492,20 @@ def main():
         attach_official_tables(doc,records)
         quarantine_unsupported(doc,records,now.date().isoformat())
     (OUT/'draft.json').write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding='utf-8')
-    for review_attempt in range(2):
+    for review_attempt in range(3):
         review = generate(json.dumps({'task': '초안의 모든 주장을 근거와 대조. 근거 부족, 시점 혼동, 숫자 오류면 reject. '
                                       '서로 다른 자료의 같은 사실을 교차 확인. 원문을 읽지 못한 것은 verified로 보지 않음. '
+                                      '10번 조건부 시나리오는 현재 발생 사실이나 전망 확정이 아닌 편집자 해석이다. '
+                                      '11번 미확인 일정은 부재를 의미하지 않는다. '
+                                      '각 지수의 날짜·값은 코드가 공식 관측 자료로 작성했으며, 공통일을 사용한다. '
+                                      '원문에 존재하지만 초안이 인용하지 않은 다른 기사 내용의 누락만으로는 오류로 보지 않는다. '
                                       'JSON {"approved":boolean,"issues":[string]} 반환.',
                                       'draft': doc, 'evidence': evidence}, ensure_ascii=False))
         (OUT/'review.json').write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding='utf-8')
-        print('초안 근거 검토: '+json.dumps(review,ensure_ascii=False))
+        print('초안 근거 검토: '+json.dumps(review,ensure_ascii=False),flush=True)
         if review.get('approved') is True and not review.get('issues'):
             break
-        if review_attempt == 1:
+        if review_attempt == 2:
             raise RuntimeError('근거 대조 검사 미통과: 게시하지 않습니다.')
         doc=attach_official_tables(normalize_format(generate(json.dumps({
             'task':'독립 검토 지적을 원문과 대조해 수정. 근거 없는 주장은 삭제하거나 확인 불가로 표시. 원문에 없는 인용 생성 금지. JSON 초안 전체 반환.',
@@ -463,7 +527,7 @@ def finish_image(doc,now):
                                   'JSON {"approved":boolean,"issues":[string]} 반환.',
                                   'draft':doc},ensure_ascii=False),target)
     (OUT/'visual_review.json').write_text(json.dumps(visual,ensure_ascii=False,indent=2),encoding='utf-8')
-    print('PNG 검토: '+json.dumps(visual,ensure_ascii=False))
+    print('PNG 검토: '+json.dumps(visual,ensure_ascii=False),flush=True)
     if visual.get('approved') is not True or visual.get('issues'):
         raise RuntimeError('이미지 검토 미통과: 게시하지 않습니다.')
     (OUT/'ready.json').write_text(json.dumps({'date':doc['date'],'png':target.name,
